@@ -1,28 +1,31 @@
 ﻿using System;
+using System.Linq;
 using Android.App;
+using Android.Content;
 using Android.OS;
-using Android.Runtime;
-using Android.Support.Design.Widget;
 using Android.Support.V7.App;
 using Android.Views;
 using Android.Widget;
+using AlertDialog = Android.App.AlertDialog;
+using Toolbar = Android.Support.V7.Widget.Toolbar;
 
 namespace _7chafen_sharp
 {
     [Activity(Label = "@string/app_name", Theme = "@style/AppTheme.NoActionBar", MainLauncher = true)]
     public class MainActivity : AppCompatActivity
     {
+        private string token { get; set; }
 
         protected override void OnCreate(Bundle savedInstanceState)
         {
             base.OnCreate(savedInstanceState);
             SetContentView(Resource.Layout.activity_main);
 
-            Android.Support.V7.Widget.Toolbar toolbar = FindViewById<Android.Support.V7.Widget.Toolbar>(Resource.Id.toolbar);
+            var toolbar =
+                FindViewById<Toolbar>(Resource.Id.toolbar);
             SetSupportActionBar(toolbar);
 
-            FloatingActionButton fab = FindViewById<FloatingActionButton>(Resource.Id.fab);
-            fab.Click += FabOnClick;
+            Login();
         }
 
         public override bool OnCreateOptionsMenu(IMenu menu)
@@ -33,21 +36,84 @@ namespace _7chafen_sharp
 
         public override bool OnOptionsItemSelected(IMenuItem item)
         {
-            int id = item.ItemId;
-            if (id == Resource.Id.action_settings)
+            var id = item.ItemId;
+            if (id == Resource.Id.action_about)
             {
+                var alert = new AlertDialog.Builder(this);
+                alert.SetTitle("关于");
+                alert.SetMessage("七天网络第三方查分 App.");
+                alert.SetPositiveButton("确定", (senderAlert, args) => { });
+
+                alert.SetNeutralButton("Github",
+                    (senderAlert, args) => { Toast.MakeText(this, "已开源在 Github!", ToastLength.Short).Show(); });
+
+
+                Dialog dialog = alert.Create();
+                dialog.Show();
                 return true;
+            }
+
+            if (id == Resource.Id.action_logout)
+            {
+                GetSharedPreferences("config", FileCreationMode.Private)
+                    .Edit().PutString("token", "").Apply();
+                ShowLoginDialog();
             }
 
             return base.OnOptionsItemSelected(item);
         }
 
-        private void FabOnClick(object sender, EventArgs eventArgs)
+        private async void Login()
         {
-            View view = (View) sender;
-            Snackbar.Make(view, "Replace with your own action", Snackbar.LengthLong)
-                .SetAction("Action", (Android.Views.View.IOnClickListener)null).Show();
+            var storedToken = GetSharedPreferences("config", FileCreationMode.Private).GetString("token", "");
+            if (await API.Validate(storedToken))
+            {
+                token = storedToken;
+                refresh();
+            }
+            else
+            {
+                ShowLoginDialog();
+            }
         }
-	}
-}
 
+        private void ShowLoginDialog()
+        {
+            var alert = new AlertDialog.Builder(this);
+            alert.SetTitle("请登录");
+            var view = View.Inflate(this, Resource.Layout.login_dialog, null);
+            alert.SetView(view);
+            alert.SetPositiveButton("登录", (EventHandler<DialogClickEventArgs>) null);
+            var dialog = alert.Show();
+            dialog.GetButton((int) DialogButtonType.Positive).Click += async (sender, args) =>
+            {
+                var username = view.FindViewById<EditText>(Resource.Id.et_name).Text;
+                var password = view.FindViewById<EditText>(Resource.Id.et_pwd).Text;
+                var token = await API.Login(username, password);
+                if (token != null)
+                {
+                    Toast.MakeText(this, "登录成功！", ToastLength.Short).Show();
+                    refresh();
+                    this.token = token;
+                    GetSharedPreferences("config", FileCreationMode.Private)
+                        .Edit().PutString("token", token).Apply();
+                    dialog.Dismiss();
+                }
+
+                Toast.MakeText(this, "登录失败！", ToastLength.Short).Show();
+            };
+        }
+
+        private async void refresh()
+        {
+            var exams = await API.GetExams(token);
+            var listView = FindViewById<ListView>(Resource.Id.listView1);
+            var nameList = exams.Select(x => x.name).ToList();
+            listView.Adapter = new ArrayAdapter<string>(this, Resource.Layout.list_item, nameList);
+            listView.ItemClick += (sender, args) =>
+            {
+                Toast.MakeText(this, exams[args.Position].name, ToastLength.Short).Show();
+            };
+        }
+    }
+}
